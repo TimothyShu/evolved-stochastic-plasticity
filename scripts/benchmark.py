@@ -47,7 +47,14 @@ def main():
     p.add_argument("--n-evals", type=int, default=1)
     p.add_argument("--repeats", type=int, default=3)
     p.add_argument("--out", default="bench.csv")
+    p.add_argument("--allow-cpu", action="store_true",
+                   help="permit a CPU run (otherwise refuse: CPU numbers are not the gate)")
     a = p.parse_args()
+
+    platform = jax.devices()[0].platform
+    if platform == "cpu" and not a.allow_cpu:
+        sys.exit("benchmark: JAX is on CPU, not GPU — check `nvidia-smi` and "
+                 "`python -c 'import jax; print(jax.devices())'`. Pass --allow-cpu to run anyway.")
 
     base = load_config(a.config)
     print(f"device: {jax.devices()[0]}  dt={base.dt} ms  lifetime={base.lifetime_steps} steps")
