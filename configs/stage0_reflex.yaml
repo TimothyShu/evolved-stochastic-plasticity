@@ -1,0 +1,52 @@
+# Stage 0 — skeleton + throughput gate. Reflex task, no learning.
+name: stage0_reflex
+seed: 0
+dt: 1.0                  # ms; asserted dt <= tau/10 for every time constant
+
+alif:
+  tau_m: 20.0
+  tau_a: 700.0           # plan range 200–2000 ms; swept at Stage 1
+  t_ref: 2.0
+  v_th: 1.0
+  beta: 1.8              # placeholder (LSNN convention); tune at Stage 1
+
+io:
+  encoder: poisson
+  decoder: argmax
+  in_pop: 8
+  r_max: 100.0
+  tau_readout: 20.0
+  n_reward_channels: 0
+
+plasticity:
+  rule: identity         # Stage 1 → three_factor
+  w_max: 2.0
+  noise_sigma: 0.0
+
+neuromod:
+  kind: external
+  baseline_tau: 0.0
+
+genome:
+  decoder: direct
+  n_hidden_max: 64
+  n_out: 2
+  init_hidden_active: 32
+  init_edge_density: 0.15
+  inherit_weights: false   # weights redrawn every lifetime from a fixed distribution
+  w_init_std: 0.3
+  frac_inhibitory: 0.2
+
+task:
+  name: reflex
+  horizon: 50            # env steps
+  substeps: 10           # × dt = 10 ms per env step → 500-step lifetime
+  n_cues: 2
+  switch_every: 10
+  grace_steps: 2
+
+evo:
+  population_size: 256
+  tournament_size: 4
+  n_evals: 4
+  n_generations: 200

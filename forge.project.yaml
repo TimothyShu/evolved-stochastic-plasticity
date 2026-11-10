@@ -1,0 +1,17 @@
+# forge-queue project descriptor for esp. Read by the dashboard to render a
+# typed "new job" form; the queue maps FORGE_PARAM_* → CLI flags and forces
+# --output-dir to the archived run dir.
+name: esp
+description: evolved-stochastic-plasticity — evolved SNN structure + online three-factor plasticity
+venv: ~/jax-env
+params:
+  - {name: config,        type: str,   default: "configs/stage0_reflex.yaml"}
+  - {name: n-replicates,  type: int,   default: 3}
+  - {name: n-generations, type: int,   default: 200}
+  - {name: n-evals,       type: int,   default: 4,   help: "lifetimes per fitness estimate"}
+  - {name: pop-size,      type: int,   default: 256}
+  - {name: rule,          type: enum,  choices: [identity, three_factor], default: identity}
+  - {name: horizon,       type: int,   default: 50,  help: "env steps per lifetime"}
+  - {name: seed,          type: int,   default: 0}
+  - {name: smoke-test,    type: bool,  default: false}
+  - {name: quiet,         type: bool,  default: false}
