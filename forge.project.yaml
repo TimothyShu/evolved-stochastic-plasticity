@@ -1,17 +1,22 @@
-# forge-queue project descriptor for esp. Read by the dashboard to render a
-# typed "new job" form; the queue maps FORGE_PARAM_* → CLI flags and forces
-# --output-dir to the archived run dir.
+# forge-queue project descriptor for esp — renders the dashboard's typed submit
+# form. The queue itself only needs run.sh. Params not relevant to the chosen
+# mode are ignored by run.sh's script (evolve vs benchmark flags differ).
 name: esp
 description: evolved-stochastic-plasticity — evolved SNN structure + online three-factor plasticity
 venv: ~/jax-env
 params:
+  - {name: mode,          type: enum,  choices: [evolve, benchmark], default: evolve}
   - {name: config,        type: str,   default: "configs/stage0_reflex.yaml"}
+  - {name: set,           type: str,   default: "", help: "dotted overrides, space-separated: plasticity.rule=three_factor evo.n_evals=8"}
+  # evolve mode
   - {name: n-replicates,  type: int,   default: 3}
   - {name: n-generations, type: int,   default: 200}
   - {name: n-evals,       type: int,   default: 4,   help: "lifetimes per fitness estimate"}
   - {name: pop-size,      type: int,   default: 256}
   - {name: rule,          type: enum,  choices: [identity, three_factor], default: identity}
-  - {name: horizon,       type: int,   default: 50,  help: "env steps per lifetime"}
   - {name: seed,          type: int,   default: 0}
   - {name: smoke-test,    type: bool,  default: false}
-  - {name: quiet,         type: bool,  default: false}
+  # benchmark mode (Stage 0 gate)
+  - {name: hidden,        type: str,   default: "64,256,512", help: "benchmark: hidden sizes"}
+  - {name: pop,           type: str,   default: "256,1024,4096", help: "benchmark: population sizes"}
+  - {name: rules,         type: str,   default: "identity,three_factor", help: "benchmark: rules"}
