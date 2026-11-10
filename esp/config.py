@@ -115,6 +115,7 @@ class ExperimentConfig:
     name: str = "stage0_reflex"
     seed: int = 0
     dt: float = 1.0             # ms — fidelity constraint, NOT a throughput knob
+    scan_unroll: int = 1        # inner-scan unroll: pure performance knob, no semantic effect
     alif: ALIFConfig = field(default_factory=ALIFConfig)
     io: IOConfig = field(default_factory=IOConfig)
     plasticity: PlasticityConfig = field(default_factory=PlasticityConfig)

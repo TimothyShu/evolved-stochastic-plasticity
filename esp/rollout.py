@@ -7,7 +7,7 @@ One lifetime: decode → reset → scan over env steps, each an inner scan over
 `substeps` neural steps of dt:  encode → ALIF → plasticity → readout.
 
 Data partition = the firewall (plan §4):
-  closure (evolved-frozen within a lifetime): phenotype.sign_conn,
+  closure (evolved-frozen within a lifetime): phenotype.sign_pre,
       phenotype.plastic_mask, phenotype.rp, phenotype.active
   carry   (plastic):  w, traces, neuron state, modulator state, env state, key
 Weights are carry; nothing the network does can reach the closure.
@@ -45,7 +45,6 @@ class Carry(NamedTuple):
     ret: jnp.ndarray
     n_spikes: jnp.ndarray
     n_silent: jnp.ndarray
-    abs_dw: jnp.ndarray
 
 
 def rollout(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
@@ -62,30 +61,29 @@ def lifetime(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
 
     k_dec, k_env, k_run = jax.random.split(key, 3)
     ph = decode(genome, k_dec, cfg)
-    w_eff_static = ph.sign_conn * ph.w0          # used only when nothing learns
 
     def substep(c: Carry, _):
         k_next, k_enc, k_noise = jax.random.split(c.key, 3)
         x = io.encode(k_enc, c.obs, c.reward, cfg)
         pre = jnp.concatenate([x, c.neuron.z])
-        w_eff = ph.sign_conn * c.w if learns else w_eff_static
-        neuron, z = alif.step(c.neuron, pre, w_eff, ph.active, cfg.alif, cfg.dt)
+        # Dale sign applied to the spike vector: (pre ⊙ s)·W = pre·(diag(s) W).
+        # Exact (±1 products), and the matvec streams W directly — no signed copy.
+        neuron, z = alif.step(c.neuron, pre * ph.sign_pre, c.w, ph.active, cfg.alif, cfg.dt)
 
         if learns:
             noise = jax.random.normal(k_noise, c.w.shape) if noisy else None
             traces, dw = plasticity.update(c.traces, pre, z, c.m, c.w, noise, ph.rp, cfg)
             w = plasticity.apply(c.w, dw, ph.plastic_mask, cfg)
-            abs_dw = c.abs_dw + jnp.sum(jnp.abs(w - c.w))
         else:
-            traces, w, abs_dw = c.traces, c.w, c.abs_dw
+            traces, w = c.traces, c.w
 
         readout = io.update_readout(c.readout, z[-n_out:], cfg)
         c = c._replace(neuron=neuron, w=w, traces=traces, readout=readout, key=k_next,
-                       n_spikes=c.n_spikes + jnp.sum(z), abs_dw=abs_dw)
+                       n_spikes=c.n_spikes + jnp.sum(z))
         return c, None
 
     def env_step(c: Carry, _):
-        c, _ = jax.lax.scan(substep, c, None, length=cfg.task.substeps)
+        c, _ = jax.lax.scan(substep, c, None, length=cfg.task.substeps, unroll=cfg.scan_unroll)
         action = io.decode(c.readout, cfg)
         env_state, obs, reward, done = task.step(c.env_state, action, cfg)
         mod_state, m = neuromod.modulate(c.mod_state, reward, cfg)
@@ -99,7 +97,7 @@ def lifetime(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
         neuron=alif.init_state(cfg.n_neurons), w=ph.w0, traces=plasticity.init_traces(cfg),
         mod_state=neuromod.init(cfg), m=zero, env_state=env_state, obs=obs, reward=zero,
         readout=jnp.zeros(n_out, jnp.float32), key=k_run,
-        ret=zero, n_spikes=zero, n_silent=jnp.zeros((), jnp.int32), abs_dw=zero,
+        ret=zero, n_spikes=zero, n_silent=jnp.zeros((), jnp.int32),
     )
     c, _ = jax.lax.scan(env_step, c0, None, length=cfg.task.horizon)
 
@@ -110,7 +108,9 @@ def lifetime(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
         "return": c.ret,
         "rate_hz": c.n_spikes / n_active / T_s,
         "frac_silent": c.n_silent / cfg.task.horizon,
-        "sum_abs_dw": c.abs_dw,
+        # Net weight change ‖w_T − w_0‖₁, computed once (not path length, which
+        # under noise is dominated by the random walk and cost a pass per step).
+        "net_abs_dw": jnp.sum(jnp.abs(c.w - ph.w0)),
     }
     return fitness, metrics, (ph, c)
 

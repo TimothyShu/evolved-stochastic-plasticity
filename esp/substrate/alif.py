@@ -6,7 +6,7 @@ substrate/alif.py — Adaptive leaky integrate-and-fire (ALIF), hard spikes.
 Dynamics per step (exact exponential decay, so unconditionally stable; the
 dt <= tau/10 bound is an accuracy constraint on spike timing):
 
-    v  <- α·v + W_effᵀ·pre            α = exp(-dt/τ_m)
+    v  <- α·v + Wᵀ·pre               α = exp(-dt/τ_m)
     A   = v_th + β·a                   adaptive threshold
     z   = [v >= A] ∧ [ref == 0]        hard Heaviside — no surrogate
     v  <- v − z·A                      soft reset (LSNN convention)
@@ -48,8 +48,8 @@ def n_ref_steps(cfg: ALIFConfig, dt: float) -> int:
 
 def step(
     state: ALIFState,
-    pre: jnp.ndarray,       # [n_pre] presynaptic spikes (inputs ++ previous z)
-    w_eff: jnp.ndarray,     # [n_pre, N] signed effective weights
+    pre: jnp.ndarray,       # [n_pre] signed presynaptic spikes (inputs ++ previous z) ⊙ Dale sign
+    w: jnp.ndarray,         # [n_pre, N] weight magnitudes
     active: jnp.ndarray,    # [N] bool — inactive slots never spike
     cfg: ALIFConfig,
     dt: float,
@@ -57,7 +57,7 @@ def step(
     alpha = math.exp(-dt / cfg.tau_m)
     rho = math.exp(-dt / cfg.tau_a)
 
-    v = alpha * state.v + pre @ w_eff
+    v = alpha * state.v + pre @ w
     thr = cfg.v_th + cfg.beta * state.a
     z = ((v >= thr) & (state.ref == 0) & active).astype(jnp.float32)
     v = v - z * thr

@@ -40,7 +40,7 @@ mode = os.environ["MODE"]
 ACCEPTS = {
     "evolve": {"n-replicates", "seed", "pop-size", "n-generations", "n-evals", "rule",
                "horizon", "checkpoint-every", "early-stop-window", "resume", "smoke-test", "quiet"},
-    "benchmark": {"hidden", "pop", "rules", "noise", "n-evals", "repeats", "allow-cpu"},
+    "benchmark": {"hidden", "pop", "rules", "unroll", "noise", "n-evals", "repeats", "allow-cpu"},
 }[mode]
 
 out = ["--config", params.pop("config", "") or "configs/stage0_reflex.yaml"]

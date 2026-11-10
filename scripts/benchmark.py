@@ -44,6 +44,7 @@ def main():
     p.add_argument("--pop", type=ints, default=[256, 1024])
     p.add_argument("--rules", default="identity,three_factor")
     p.add_argument("--noise", type=float, default=0.0, help="plasticity.noise_sigma (adds N² RNG per step)")
+    p.add_argument("--unroll", type=ints, default=[1], help="inner-scan unroll values to sweep")
     p.add_argument("--n-evals", type=int, default=1)
     p.add_argument("--repeats", type=int, default=3)
     p.add_argument("--out", default="bench.csv")
@@ -59,10 +60,9 @@ def main():
     base = load_config(a.config)
     print(f"device: {jax.devices()[0]}  dt={base.dt} ms  lifetime={base.lifetime_steps} steps")
     rows = []
-    for rule in a.rules.split(","):
-        for h in a.hidden:
-            for P in a.pop:
-                cfg = replace(base, **{
+    points = [(r, h, P, u) for r in a.rules.split(",") for h in a.hidden for P in a.pop for u in a.unroll]
+    for rule, h, P, u in points:
+                cfg = replace(base, scan_unroll=u, **{
                     "genome.n_hidden_max": h, "genome.init_hidden_active": h // 2,
                     "evo.population_size": P, "evo.n_evals": a.n_evals,
                     "plasticity.rule": rule, "plasticity.noise_sigma": a.noise,
@@ -78,15 +78,15 @@ def main():
                         jax.block_until_ready(ev(pop, jax.random.PRNGKey(2 + r)))
                     run_s = (time.perf_counter() - t0) / a.repeats
                 except Exception as e:  # e.g. OOM at large P·N²
-                    print(f"{rule:13s} N={cfg.n_neurons:4d} P={P:5d}  FAILED: {type(e).__name__}")
+                    print(f"{rule:13s} N={cfg.n_neurons:4d} P={P:5d} u={u:2d}  FAILED: {type(e).__name__}")
                     continue
                 gts = P * a.n_evals * cfg.lifetime_steps / run_s
-                row = {"rule": rule, "n_neurons": cfg.n_neurons, "n_pre": cfg.n_pre, "pop": P,
+                row = {"rule": rule, "n_neurons": cfg.n_neurons, "n_pre": cfg.n_pre, "pop": P, "unroll": u,
                        "n_evals": a.n_evals, "lifetime_steps": cfg.lifetime_steps,
                        "compile_s": round(compile_s, 2), "eval_s": round(run_s, 4),
                        "genome_steps_per_s": round(gts)}
                 rows.append(row)
-                print(f"{rule:13s} N={cfg.n_neurons:4d} P={P:5d}  {run_s:8.3f} s/eval  "
+                print(f"{rule:13s} N={cfg.n_neurons:4d} P={P:5d} u={u:2d}  {run_s:8.3f} s/eval  "
                       f"{gts:12.3e} genome·steps/s  (compile {compile_s:.1f}s)", flush=True)
 
     with open(a.out, "w", newline="") as f:

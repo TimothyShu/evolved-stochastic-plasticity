@@ -52,8 +52,8 @@ class Genome(NamedTuple):
 
 
 class Phenotype(NamedTuple):
-    w0: jnp.ndarray            # [n_pre, N] initial magnitudes for this lifetime
-    sign_conn: jnp.ndarray     # [n_pre, N] float: Dale sign × connectivity (0 = no synapse)
+    w0: jnp.ndarray            # [n_pre, N] initial magnitudes, exactly 0 off-edge
+    sign_pre: jnp.ndarray      # [n_pre] Dale sign of each presynaptic source (+1 inputs)
     plastic_mask: jnp.ndarray  # [n_pre, N] bool — the firewall
     active: jnp.ndarray        # [N] bool
     rp: RuleParams
@@ -163,11 +163,13 @@ def decode(genome: Genome, key: jax.Array, cfg: ExperimentConfig) -> Phenotype:
         w0 = jnp.abs(jax.random.normal(key, genome.w.shape)) * gc.w_init_std
     w0 = jnp.clip(w0, 0.0, cfg.plasticity.w_max) * conn
 
+    # Dale's law: sign is per presynaptic source, so it is a vector, not a matrix.
+    # Connectivity needs no separate array: w0 is 0 off-edge and plastic_mask is
+    # False there, so non-edges stay exactly 0 for the whole lifetime.
     sign_pre = jnp.concatenate([jnp.ones(cfg.n_in), jnp.where(genome.inhib, -1.0, 1.0)])
-    sign_conn = sign_pre[:, None] * conn
 
     plastic_mask = genome.plastic & conn & ~grounding_rows(cfg)[:, None]
     if cfg.plasticity.rule == "identity":
         plastic_mask = jnp.zeros_like(plastic_mask)
 
-    return Phenotype(w0, sign_conn, plastic_mask, genome.active, decode_rule(genome.rule, cfg))
+    return Phenotype(w0, sign_pre, plastic_mask, genome.active, decode_rule(genome.rule, cfg))

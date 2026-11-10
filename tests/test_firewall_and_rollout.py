@@ -25,7 +25,7 @@ def test_grounding_rows_never_plastic(cfg):
     gr = grounding_rows(cfg)
     assert int(gr.sum()) == 2
     assert not bool(jnp.any(ph.plastic_mask[gr]))
-    assert bool(jnp.any(ph.sign_conn[gr] != 0))       # wired, but frozen
+    assert bool(jnp.any(ph.w0[gr] != 0))           # wired, but frozen
 
 
 def test_grounding_weights_bit_identical_after_learning(cfg):
@@ -38,7 +38,7 @@ def test_grounding_weights_bit_identical_after_learning(cfg):
     g = g._replace(plastic=jnp.ones_like(g.plastic), rule=jnp.full(5, 1.0))
     _, m, (ph, c) = jax.jit(lambda k: lifetime(g, k, cfg))(jax.random.PRNGKey(3))
     gr = grounding_rows(cfg)
-    assert float(m["sum_abs_dw"]) > 0                                      # learning happened
+    assert float(m["net_abs_dw"]) > 0                                      # learning happened
     assert bool(jnp.any(c.w[~gr] != ph.w0[~gr]))
     assert np.array_equal(np.asarray(c.w[gr]), np.asarray(ph.w0[gr]))     # grounding bit-identical
 
@@ -46,14 +46,14 @@ def test_grounding_weights_bit_identical_after_learning(cfg):
 def test_identity_rule_freezes_everything(cfg):
     g = random_genome(jax.random.PRNGKey(0), cfg)
     _, m = rollout(g, jax.random.PRNGKey(1), cfg)
-    assert float(m["sum_abs_dw"]) == 0.0
+    assert float(m["net_abs_dw"]) == 0.0
 
 
 def test_three_factor_changes_weights(cfg):
     cfg = replace(cfg, **{"plasticity.rule": "three_factor", "plasticity.noise_sigma": 0.01})
     g = random_genome(jax.random.PRNGKey(0), cfg)
     _, m = rollout(g, jax.random.PRNGKey(1), cfg)
-    assert float(m["sum_abs_dw"]) > 0.0
+    assert float(m["net_abs_dw"]) > 0.0
 
 
 def test_rollout_deterministic_given_key(cfg):
@@ -87,3 +87,23 @@ def test_population_eval_shapes(cfg):
     assert f.shape == (cfg.evo.population_size,)
     assert bool(jnp.all((f >= 0) & (f <= 1)))
     assert m["rate_hz"].shape == (cfg.evo.population_size,)
+
+
+def test_scan_unroll_is_semantically_neutral(cfg):
+    cfg = replace(cfg, **{"plasticity.rule": "three_factor", "plasticity.noise_sigma": 0.01})
+    g = random_genome(jax.random.PRNGKey(0), cfg)
+    a = rollout(g, jax.random.PRNGKey(7), cfg)
+    b = rollout(g, jax.random.PRNGKey(7), replace(cfg, scan_unroll=5))
+    assert jax.tree_util.tree_all(jax.tree_util.tree_map(lambda x, y: bool(jnp.allclose(x, y)), a, b))
+
+
+def test_off_edge_weights_stay_exactly_zero(cfg):
+    """No sign/connectivity matrix any more: non-edges must stay 0 via w0 + plastic_mask."""
+    from esp.genome.direct import connected
+    from esp.rollout import lifetime
+    cfg = replace(cfg, **{"plasticity.rule": "three_factor", "plasticity.noise_sigma": 0.1})
+    g = random_genome(jax.random.PRNGKey(0), cfg)
+    g = g._replace(plastic=jnp.ones_like(g.plastic), rule=jnp.full(5, 1.0))
+    _, _, (ph, c) = lifetime(g, jax.random.PRNGKey(1), cfg)
+    off = ~connected(g, cfg)
+    assert bool(jnp.all(c.w[off] == 0.0))
