@@ -2,6 +2,7 @@
 name: stage0_reflex
 seed: 0
 dt: 1.0                  # ms; asserted dt <= tau/10 for every time constant
+scan_unroll: 10          # perf only; ~1.5x on forge. Hurts only tiny cache-resident batches (N~64, P*E~1024)
 
 alif:
   tau_m: 20.0

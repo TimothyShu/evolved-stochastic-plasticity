@@ -20,4 +20,4 @@ params:
   - {name: hidden,        type: str,   default: "64,256,512", help: "benchmark: hidden sizes"}
   - {name: pop,           type: str,   default: "256,1024,4096", help: "benchmark: population sizes"}
   - {name: rules,         type: str,   default: "identity,three_factor", help: "benchmark: rules"}
-  - {name: unroll,        type: str,   default: "1,5,10", help: "benchmark: inner-scan unroll values"}
+  - {name: unroll,        type: str,   default: "10", help: "benchmark: inner-scan unroll values"}
