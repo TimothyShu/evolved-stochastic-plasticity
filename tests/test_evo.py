@@ -66,3 +66,26 @@ def test_genome_roundtrip(cfg, tmp_path):
     save_genome(tmp_path / "g.npz", g)
     g2 = load_genome(tmp_path / "g.npz")
     assert all(bool(jnp.all(a == b)) for a, b in zip(g, g2))
+
+
+def test_rule_stats_physical_and_logged(cfg, tmp_path):
+    from esp.evo.loop import rule_stats
+    pop = init_population(jax.random.PRNGKey(0), cfg)
+    fit = jnp.arange(cfg.evo.population_size, dtype=jnp.float32)
+    s = rule_stats(pop, fit, cfg)
+    gc = cfg.genome
+    assert gc.eta_range[0] <= s["mean_eta"] <= gc.eta_range[1]
+    assert 0.0 <= s["mean_a_minus"] <= 2.0
+    assert s["best_tau_elig"] >= gc.tau_floor_factor * cfg.dt
+    assert 0.0 <= s["mean_plastic_frac"] <= 1.0
+    assert s["mean_eff_eta"] <= s["mean_eta"] + 1e-9
+    # all-plastic population reports exactly 1
+    allp = pop._replace(plastic=jnp.ones_like(pop.plastic))
+    assert abs(rule_stats(allp, fit, cfg)["mean_plastic_frac"] - 1.0) < 1e-6
+    # and it reaches history.jsonl through the loop
+    run_dir = make_run_dir(tmp_path, "r")
+    run_evolution(jax.random.PRNGKey(0), cfg, make_population_eval(cfg),
+                  callback=make_logger(run_dir, 0, verbose=False))
+    import json
+    h = json.loads((run_dir / "history.jsonl").read_text().splitlines()[0])
+    assert {"mean_eta", "best_a_minus", "mean_plastic_frac", "mean_eff_eta"} <= set(h)

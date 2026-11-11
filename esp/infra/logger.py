@@ -79,7 +79,11 @@ def make_logger(run_dir: Path, checkpoint_every: int = 50, verbose: bool = True)
         if verbose:
             print(f"gen {g:5d}  max {stats['max_fitness']:.4f}  mean {stats['mean_fitness']:.4f}  "
                   f"rate {stats.get('mean_rate_hz', float('nan')):6.1f} Hz  "
-                  f"active {stats['mean_n_active']:.1f}  ({stats['elapsed_s']:.0f}s)", flush=True)
+                  f"active {stats['mean_n_active']:.1f}  "
+                  f"eta {stats.get('mean_eta', float('nan')):.4f}  "
+                  f"a- {stats.get('mean_a_minus', float('nan')):.2f}  "
+                  f"plastic {stats.get('mean_plastic_frac', float('nan')):.2f}  "
+                  f"({stats['elapsed_s']:.0f}s)", flush=True)
 
     return callback
 

@@ -19,7 +19,7 @@ import jax
 import jax.numpy as jnp
 
 from ..config import ExperimentConfig
-from ..genome.direct import Genome, connected, random_genome
+from ..genome.direct import Genome, connected, decode_rule, grounding_rows, random_genome
 from .mutation import mutate
 
 
@@ -94,6 +94,29 @@ def make_evolve_step(cfg: ExperimentConfig):
     return evolve_step
 
 
+def rule_stats(pop: Genome, fitness, cfg: ExperimentConfig) -> dict:
+    """Evolved plasticity meta-parameters, in physical units: population mean and
+    the best genome's values. plastic_frac = flagged-plastic share of connected,
+    non-grounding synapses (the genome's flags — reported even under the identity
+    rule, where decode zeroes the mask, so drift in the flags stays visible)."""
+    rp = jax.vmap(lambda r: decode_rule(r, cfg))(pop.rule)
+
+    def frac(g):
+        eligible = connected(g, cfg) & ~grounding_rows(cfg)[:, None]
+        return jnp.sum(g.plastic & eligible) / jnp.maximum(jnp.sum(eligible), 1)
+
+    pf = jax.vmap(frac)(pop)
+    b = int(jnp.argmax(fitness))
+    out = {}
+    for name, v in [("eta", rp.eta), ("a_minus", rp.a_minus), ("tau_elig", rp.tau_elig),
+                    ("tau_pre", rp.tau_pre), ("tau_post", rp.tau_post), ("plastic_frac", pf)]:
+        out[f"mean_{name}"] = float(jnp.mean(v))
+        out[f"best_{name}"] = float(v[b])
+    # η × plastic share: one number for "how much can this population learn"
+    out["mean_eff_eta"] = float(jnp.mean(rp.eta * pf))
+    return out
+
+
 def collect_stats(gen, fitness, f_raw, metrics, pop: Genome, cfg) -> dict:
     stats = {
         "generation": gen,
@@ -105,6 +128,7 @@ def collect_stats(gen, fitness, f_raw, metrics, pop: Genome, cfg) -> dict:
     }
     for k, v in metrics.items():
         stats[f"mean_{k}"] = float(jnp.mean(v))
+    stats.update(rule_stats(pop, fitness, cfg))
     return stats
 
 
