@@ -66,6 +66,9 @@ class PlasticityConfig:
     #             Mean-preserving away from the bounds, but its long-run law is uniform on
     #             [0, w_max] (mean w_max/2 ≫ birth mean): expect slow upward drift.
     forget_target: str = "newborn"
+    # Kick distribution for all per-step weight noise (see esp/noise.py):
+    # rademacher = packed ±1, ~free; gaussian = exact normal, ~10× the cost on CPU.
+    noise_dist: str = "rademacher"
 
 
 @dataclass(frozen=True)
@@ -199,6 +202,8 @@ def check_dt(cfg: ExperimentConfig) -> None:
         if not noisy:
             raise ValueError("rule 'perturbation' explores with the forgetting noise: set "
                              "plasticity.forgetting: true with noise (matched, or noise_sigma > 0)")
+    if pc.noise_dist not in ("rademacher", "gaussian"):
+        raise ValueError(f"plasticity.noise_dist '{pc.noise_dist}' not in (rademacher, gaussian)")
     if pc.noise_mode not in ("fixed", "matched"):
         raise ValueError(f"plasticity.noise_mode '{pc.noise_mode}' not in (fixed, matched)")
     if pc.noise_mode == "matched" and not pc.forgetting:

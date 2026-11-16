@@ -24,7 +24,7 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 
-from . import io, neuromod, plasticity, tasks
+from . import io, neuromod, noise as noise_mod, plasticity, tasks
 from .config import ExperimentConfig
 from .genome import Genome, decode
 from .substrate import alif
@@ -78,7 +78,7 @@ def lifetime(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
         neuron, z = alif.step(c.neuron, pre * ph.sign_pre, c.w, ph.active, cfg.alif, cfg.dt)
 
         if substep_learns:
-            noise = jax.random.normal(k_noise, c.w.shape) if noisy else None
+            noise = noise_mod.sample(k_noise, c.w.shape, pc.noise_dist) if noisy else None
             traces, dw = plasticity.update(c.traces, pre, z, c.m, c.w, noise, ph.rp, cfg)
             w = plasticity.apply(c.w, dw, ph.plastic_mask, cfg)
         else:
@@ -93,7 +93,7 @@ def lifetime(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
         """Once per env step: exact AR(1) over the interval (see plasticity.forget).
         Under 'perturbation' the applied kick b·ξ is also added to the noise trace."""
         k_next, k_f = jax.random.split(c.key)
-        xi = jax.random.normal(k_f, c.w.shape) if forget_noisy else None
+        xi = noise_mod.sample(k_f, c.w.shape, pc.noise_dist) if forget_noisy else None
         w = plasticity.forget(c.w, xi, ph.plastic_mask, ph.rp, cfg, env_interval, ph.w0)
         c = c._replace(w=w, key=k_next)
         if perturb:

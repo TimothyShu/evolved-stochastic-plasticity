@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from esp import neuromod, plasticity
+from esp import neuromod, noise, plasticity
 from esp.config import ExperimentConfig, replace
 from esp.genome.direct import N_RULE_PARAMS, grounding_rows, random_genome
 
@@ -25,7 +25,7 @@ def _rp(eta, tau_n):
     return plasticity.RuleParams(one, one, jnp.asarray(tau_n), jnp.asarray(eta), one, jnp.asarray(1e9))
 
 
-def _toy(cfg, eta, n_steps, d=400, seed=0, shuffle_reward=False):
+def _toy(cfg, eta, n_steps, d=400, seed=0, shuffle_reward=False, dist="rademacher"):
     """R = g·w (+ small observation noise). Same order as the rollout:
     reward -> δ -> credit trace -> forget/kick -> trace += kick."""
     kg, kr = jax.random.split(jax.random.PRNGKey(seed))
@@ -43,7 +43,7 @@ def _toy(cfg, eta, n_steps, d=400, seed=0, shuffle_reward=False):
             r = 0.001 * jax.random.normal(k_shuf)
         mod_state, m = neuromod.modulate(mod_state, r, cfg)
         w = plasticity.credit_noise(w, n, m, mask, rp, cfg)
-        xi = jax.random.normal(k_xi, (d,))
+        xi = noise.sample(k_xi, (d,), dist)
         w = plasticity.forget(w, xi, mask, rp, cfg, DELTA)
         n = plasticity.update_noise_trace(n, b * xi, rp, DELTA)
         return (w, n, mod_state), None
@@ -54,13 +54,14 @@ def _toy(cfg, eta, n_steps, d=400, seed=0, shuffle_reward=False):
     return float(g @ dw), float(g @ dw / (jnp.linalg.norm(dw) + 1e-12))
 
 
-def test_climbs_reward_gradient():
+@pytest.mark.parametrize("dist", ["rademacher", "gaussian"])
+def test_climbs_reward_gradient(dist):
     """Gradient-aligned displacement grows far beyond the random-walk scale."""
     cfg, n = _cfg(), 4000
-    gain, cos = _toy(cfg, eta=2.0, n_steps=n)
+    gain, cos = _toy(cfg, eta=2.0, n_steps=n, dist=dist)
     walk = 0.002 * math.sqrt(DELTA * n)          # std of g·Δw for the noise alone (|g| = 1)
-    assert gain > 5 * walk                        # measured ≈ 10× (gain 4.1 vs walk 0.4)
-    assert cos > 0.25                             # measured 0.32; random direction ~1/√400 = 0.05
+    assert gain > 5 * walk                        # 12 seeds: gain 3.1 ± 0.2 vs walk 0.4 (both dists)
+    assert cos > 0.2                              # 12 seeds: 0.26 (both); random direction ~1/√400 = 0.05
 
 
 def test_no_learning_without_reward_correlation():

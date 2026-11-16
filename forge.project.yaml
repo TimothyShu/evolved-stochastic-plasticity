@@ -23,3 +23,4 @@ params:
   - {name: unroll,        type: str,   default: "10", help: "benchmark: inner-scan unroll values"}
   - {name: forgetting,    type: bool,  default: false, help: "benchmark: decay-to-newborn + matched noise"}
   - {name: forget-target, type: enum,  choices: [newborn, own_init, none], default: newborn, help: "benchmark: forgetting target"}
+  - {name: noise-dist,    type: enum,  choices: [rademacher, gaussian], default: rademacher, help: "benchmark: synaptic noise kick distribution"}
