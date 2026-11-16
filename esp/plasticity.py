@@ -21,13 +21,22 @@ Rules
 identity      dw = 0 (Stage 0).
 three_factor  Spike-native pair-based STDP feeding an eligibility trace, gated
               by the third factor m (Stage 1):
-                  x_pre  <- d_pre·x_pre  + pre        (count traces)
-                  x_post <- d_post·x_post + post
-                  stdp    = x_pre ⊗ post − a_minus · pre ⊗ x_post
+                  x̃_pre = d_pre·x_pre,  x̃_post = d_post·x_post   (decay to now)
+                  stdp    = x̃_pre ⊗ post − a_minus · pre ⊗ x̃_post   (window e^(−Δt/τ))
+                  x_pre  <- x̃_pre + pre,  x_post <- x̃_post + post
                   e      <- d_e·e + stdp
                   dw      = η·m·e  (+ σ·√dt·ξ,  ξ ~ N(0, 1))
               Noise std scales as √dt so σ is a per-√ms diffusion coefficient
               and the weight random walk is dt-invariant.
+stdp          Pure pair-based STDP — no eligibility trace, no third factor:
+                  dw = η·stdp
+              Same x_pre/x_post traces and window (τ_pre, τ_post, a_minus); τ_elig is
+              unused and the modulator is ignored, so learning is purely local and
+              unsupervised. Carries no [n_pre, N] trace (cheaper). Note η is not
+              comparable across rules: three_factor applies η to an accumulated
+              trace (~τ_elig/dt pairings), stdp to each step's pairings.
+              Net drift for uncorrelated firing ∝ τ_pre − a_minus·τ_post, so additive
+              STDP is stable only if a_minus·τ_post > τ_pre (Song et al. 2000).
 """
 
 from __future__ import annotations
@@ -56,14 +65,28 @@ class Traces(NamedTuple):
     elig: jnp.ndarray     # [n_pre, N]  (shape (0, 0) for identity: nothing carried)
 
 
+RULES = ("identity", "three_factor", "stdp")
+
+
+def _stdp_term(x_pre, x_post, pre, post, rp: RuleParams):
+    """Pair-based STDP for this step. Traces must already be decayed to the current
+    step and must NOT yet include this step's spikes, so a pre→post gap of Δt steps
+    contributes exactly e^(−Δt·dt/τ_pre) (LTP) and post→pre −a₋·e^(−Δt·dt/τ_post) (LTD);
+    same-step coincidences contribute nothing. (Using undecayed traces would shift
+    the window by one step — an O(dt/τ) gain error.)"""
+    return jnp.outer(x_pre, post) - rp.a_minus * jnp.outer(pre, x_post)
+
+
 def init_traces(cfg: ExperimentConfig) -> Traces:
-    if cfg.plasticity.rule == "identity":
+    rule = cfg.plasticity.rule
+    empty = jnp.zeros((0, 0), jnp.float32)
+    if rule == "identity":
         z = jnp.zeros((0,), jnp.float32)
-        return Traces(z, z, jnp.zeros((0, 0), jnp.float32))
+        return Traces(z, z, empty)
     return Traces(
         x_pre=jnp.zeros(cfg.n_pre, jnp.float32),
         x_post=jnp.zeros(cfg.n_neurons, jnp.float32),
-        elig=jnp.zeros((cfg.n_pre, cfg.n_neurons), jnp.float32),
+        elig=jnp.zeros((cfg.n_pre, cfg.n_neurons), jnp.float32) if rule == "three_factor" else empty,
     )
 
 
@@ -83,13 +106,17 @@ def update(
     elif rule == "three_factor":
         dt = cfg.dt
         d_pre, d_post, d_e = (jnp.exp(-dt / t) for t in (rp.tau_pre, rp.tau_post, rp.tau_elig))
-        stdp = jnp.outer(traces.x_pre, post) - rp.a_minus * jnp.outer(pre, traces.x_post)
-        traces = Traces(
-            x_pre=d_pre * traces.x_pre + pre,
-            x_post=d_post * traces.x_post + post,
-            elig=d_e * traces.elig + stdp,
-        )
+        x_pre, x_post = d_pre * traces.x_pre, d_post * traces.x_post   # decayed to now
+        stdp = _stdp_term(x_pre, x_post, pre, post, rp)
+        traces = Traces(x_pre=x_pre + pre, x_post=x_post + post, elig=d_e * traces.elig + stdp)
         dw = rp.eta * modulator * traces.elig
+    elif rule == "stdp":
+        dt = cfg.dt
+        d_pre, d_post = jnp.exp(-dt / rp.tau_pre), jnp.exp(-dt / rp.tau_post)
+        x_pre, x_post = d_pre * traces.x_pre, d_post * traces.x_post
+        stdp = _stdp_term(x_pre, x_post, pre, post, rp)
+        traces = traces._replace(x_pre=x_pre + pre, x_post=x_post + post)
+        dw = rp.eta * stdp
     else:
         raise ValueError(f"unknown plasticity rule '{rule}'")
 
