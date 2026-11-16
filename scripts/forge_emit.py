@@ -26,7 +26,8 @@ import numpy as np
 import yaml
 
 SERIES_KEYS = ["max_fitness", "mean_fitness", "mean_rate_hz", "mean_n_active",
-               "mean_eta", "mean_a_minus", "mean_tau_elig", "mean_plastic_frac", "mean_eff_eta"]
+               "mean_eta", "mean_a_minus", "mean_tau_elig", "mean_tau_prior",
+               "mean_plastic_frac", "mean_eff_eta"]
 
 
 def write_records(run_dir: Path, results: list) -> None:

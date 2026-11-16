@@ -21,3 +21,4 @@ params:
   - {name: pop,           type: str,   default: "256,1024,4096", help: "benchmark: population sizes"}
   - {name: rules,         type: str,   default: "identity,three_factor", help: "benchmark: rules"}
   - {name: unroll,        type: str,   default: "10", help: "benchmark: inner-scan unroll values"}
+  - {name: forgetting,    type: bool,  default: false, help: "benchmark: decay-to-newborn + matched noise"}

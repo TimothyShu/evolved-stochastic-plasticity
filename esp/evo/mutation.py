@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 
 from ..config import EvoConfig, ExperimentConfig
-from ..genome.direct import Genome, connected, hidden_slots, pre_active, prune_isolated
+from ..genome.direct import N_LEGACY_RULE, Genome, connected, hidden_slots, pre_active, prune_isolated
 
 
 def _random_eligible(key, eligible):
@@ -26,7 +26,12 @@ def _scaled(sigma, scale):
 # ── parameter mutations ──────────────────────────────────────────────────────
 
 def perturb_rule(key, g: Genome, sigma: float) -> Genome:
-    return g._replace(rule=jnp.clip(g.rule + sigma * jax.random.normal(key, g.rule.shape), 0.0, 1.0))
+    # Legacy genes keep their original noise stream (bit-reproducible pre-forgetting
+    # runs); genes added later draw from fold_in(key, 1).
+    n_new = g.rule.shape[-1] - N_LEGACY_RULE
+    eps = jnp.concatenate([jax.random.normal(key, (N_LEGACY_RULE,)),
+                           jax.random.normal(jax.random.fold_in(key, 1), (n_new,))])
+    return g._replace(rule=jnp.clip(g.rule + sigma * eps, 0.0, 1.0))
 
 
 def perturb_weights(key, g: Genome, sigma: float, w_max: float) -> Genome:

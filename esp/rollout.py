@@ -55,8 +55,11 @@ def rollout(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
 def lifetime(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
     """rollout plus (phenotype, final carry) — for analysis and firewall tests."""
     task = tasks.get(cfg.task.name)
-    learns = cfg.plasticity.rule != "identity" or cfg.plasticity.noise_sigma > 0
-    noisy = cfg.plasticity.noise_sigma > 0
+    pc = cfg.plasticity
+    learns = pc.rule != "identity" or pc.noise_sigma > 0 or pc.forgetting
+    noisy = pc.noise_sigma > 0 and not pc.forgetting           # per-substep additive noise
+    forget_noisy = pc.forgetting and (pc.noise_mode == "matched" or pc.noise_sigma > 0)
+    env_interval = cfg.dt * cfg.task.substeps                  # forgetting step (ms)
     n_out = cfg.genome.n_out
 
     k_dec, k_env, k_run = jax.random.split(key, 3)
@@ -84,6 +87,12 @@ def lifetime(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
 
     def env_step(c: Carry, _):
         c, _ = jax.lax.scan(substep, c, None, length=cfg.task.substeps, unroll=cfg.scan_unroll)
+        if pc.forgetting and learns:
+            # Once per env step: exact AR(1) over the interval (see plasticity.forget).
+            k_next, k_f = jax.random.split(c.key)
+            xi = jax.random.normal(k_f, c.w.shape) if forget_noisy else None
+            c = c._replace(w=plasticity.forget(c.w, xi, ph.plastic_mask, ph.rp, cfg, env_interval),
+                           key=k_next)
         action = io.decode(c.readout, cfg)
         env_state, obs, reward, done = task.step(c.env_state, action, cfg)
         mod_state, m = neuromod.modulate(c.mod_state, reward, cfg)

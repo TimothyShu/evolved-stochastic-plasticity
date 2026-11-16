@@ -38,7 +38,8 @@ import jax.numpy as jnp
 from ..config import ExperimentConfig
 from ..plasticity import RuleParams
 
-N_RULE_PARAMS = 5   # tau_pre, tau_post, tau_elig, eta, a_minus — normalised to [0, 1]
+N_RULE_PARAMS = 6   # tau_pre, tau_post, tau_elig, eta, a_minus, tau_prior — normalised to [0, 1]
+N_LEGACY_RULE = 5   # genes that existed before tau_prior; their RNG streams are kept unchanged
 
 
 class Genome(NamedTuple):
@@ -129,7 +130,10 @@ def random_genome(key: jax.Array, cfg: ExperimentConfig) -> Genome:
     w = jnp.abs(jax.random.normal(k[3], (n_pre, N))) * gc.w_init_std
     edge_mask = jax.random.uniform(k[4], (n_pre, N)) < gc.init_edge_density
     plastic = jnp.ones((n_pre, N), bool)
-    rule = jax.random.uniform(k[5], (N_RULE_PARAMS,))
+    # tau_prior gene from the (previously unused) k[6], so the first five genes —
+    # and every pre-forgetting run — are bit-identical to before.
+    rule = jnp.concatenate([jax.random.uniform(k[5], (N_LEGACY_RULE,)),
+                            jax.random.uniform(k[6], (N_RULE_PARAMS - N_LEGACY_RULE,))])
 
     g = Genome(active, inhib, position, edge_mask, plastic, w, rule)
     return prune_isolated(g._replace(edge_mask=connected(g, cfg)), cfg)
@@ -151,7 +155,8 @@ def decode_rule(rule: jnp.ndarray, cfg: ExperimentConfig) -> RuleParams:
     tau_elig = jnp.maximum(_log_interp(u[2], *gc.tau_elig_range), floor)
     eta = gc.eta_range[0] + u[3] * (gc.eta_range[1] - gc.eta_range[0])
     a_minus = 2.0 * u[4]
-    return RuleParams(tau_pre, tau_post, tau_elig, eta, a_minus)
+    tau_prior = jnp.maximum(_log_interp(u[5], *gc.tau_prior_range), floor)
+    return RuleParams(tau_pre, tau_post, tau_elig, eta, a_minus, tau_prior)
 
 
 def decode(genome: Genome, key: jax.Array, cfg: ExperimentConfig) -> Phenotype:

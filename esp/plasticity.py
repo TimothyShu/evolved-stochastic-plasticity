@@ -47,6 +47,7 @@ class RuleParams(NamedTuple):
     tau_elig: jnp.ndarray
     eta: jnp.ndarray
     a_minus: jnp.ndarray
+    tau_prior: jnp.ndarray   # forgetting time constant (used iff cfg.plasticity.forgetting)
 
 
 class Traces(NamedTuple):
@@ -92,7 +93,7 @@ def update(
     else:
         raise ValueError(f"unknown plasticity rule '{rule}'")
 
-    if noise is not None:
+    if noise is not None and not cfg.plasticity.forgetting:
         dw = dw + cfg.plasticity.noise_sigma * math.sqrt(cfg.dt) * noise
     return traces, dw
 
@@ -100,4 +101,42 @@ def update(
 def apply(w: jnp.ndarray, dw: jnp.ndarray, plastic_mask: jnp.ndarray, cfg: ExperimentConfig) -> jnp.ndarray:
     """Firewall: only plastic_mask entries can change; result clipped to [0, w_max]."""
     w_new = jnp.clip(w + dw, 0.0, cfg.plasticity.w_max)
+    return jnp.where(plastic_mask, w_new, w)
+
+
+def forget_coeffs(rp: RuleParams, cfg: ExperimentConfig, interval: float):
+    """(a, b) for the reflected AR(1) step over `interval` ms:  w <- |a·w + b·ξ|."""
+    a = jnp.exp(-interval / rp.tau_prior)
+    if cfg.plasticity.noise_mode == "matched":
+        b = cfg.genome.w_init_std * jnp.sqrt(1.0 - a * a)
+    else:
+        b = jnp.asarray(cfg.plasticity.noise_sigma * math.sqrt(interval))
+    return a, b
+
+
+def forget(
+    w: jnp.ndarray,
+    noise: jnp.ndarray | None,
+    plastic_mask: jnp.ndarray,
+    rp: RuleParams,
+    cfg: ExperimentConfig,
+    interval: float,
+) -> jnp.ndarray:
+    """Decay to the newborn state over `interval` ms (firewalled by plastic_mask).
+
+        w <- min(|a·w + b·ξ|, w_max),   a = exp(-interval/τ_prior)
+
+    The AR(1) kernel is symmetric under w -> -w, so its reflection at 0 is Markov
+    with stationary law |N(0, b²/(1−a²))| exactly — for "matched", |N(0, w_init_std)|,
+    the birth distribution — for ANY interval, not only as interval -> 0. So the
+    step can be taken once per env step (the rollout does) with no change to the
+    target distribution; the decay is exact at each update, and the only
+    approximation is decay/learning interleaving within an interval, O(interval/τ_prior)
+    (≤ 1% at the 10·interval floor enforced in config). w_max is a safety rail.
+    """
+    a, b = forget_coeffs(rp, cfg, interval)
+    w_new = a * w
+    if noise is not None:
+        w_new = w_new + b * noise
+    w_new = jnp.minimum(jnp.abs(w_new), cfg.plasticity.w_max)
     return jnp.where(plastic_mask, w_new, w)

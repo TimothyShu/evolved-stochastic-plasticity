@@ -5,7 +5,7 @@ import numpy as np
 from esp import plasticity
 from esp.config import replace
 from esp.genome import decode, random_genome
-from esp.genome.direct import grounding_rows
+from esp.genome.direct import N_RULE_PARAMS, grounding_rows
 from esp.rollout import make_population_eval, rollout
 
 
@@ -35,7 +35,7 @@ def test_grounding_weights_bit_identical_after_learning(cfg):
                           "plasticity.noise_sigma": 0.1, "genome.init_edge_density": 1.0})
     g = random_genome(jax.random.PRNGKey(0), cfg)
     # every synapse flagged plastic in the genome — the mask must still hold
-    g = g._replace(plastic=jnp.ones_like(g.plastic), rule=jnp.full(5, 1.0))
+    g = g._replace(plastic=jnp.ones_like(g.plastic), rule=jnp.full(N_RULE_PARAMS, 1.0))
     _, m, (ph, c) = jax.jit(lambda k: lifetime(g, k, cfg))(jax.random.PRNGKey(3))
     gr = grounding_rows(cfg)
     assert float(m["net_abs_dw"]) > 0                                      # learning happened
@@ -74,7 +74,7 @@ def test_weights_redrawn_per_lifetime(cfg):
 
 
 def test_evolved_taus_clipped_to_dt_floor(cfg):
-    g = random_genome(jax.random.PRNGKey(0), cfg)._replace(rule=jnp.zeros(5))
+    g = random_genome(jax.random.PRNGKey(0), cfg)._replace(rule=jnp.zeros(N_RULE_PARAMS))
     rp = decode(g, jax.random.PRNGKey(0), cfg).rp
     floor = cfg.genome.tau_floor_factor * cfg.dt
     assert min(float(rp.tau_pre), float(rp.tau_post), float(rp.tau_elig)) >= floor
@@ -103,7 +103,7 @@ def test_off_edge_weights_stay_exactly_zero(cfg):
     from esp.rollout import lifetime
     cfg = replace(cfg, **{"plasticity.rule": "three_factor", "plasticity.noise_sigma": 0.1})
     g = random_genome(jax.random.PRNGKey(0), cfg)
-    g = g._replace(plastic=jnp.ones_like(g.plastic), rule=jnp.full(5, 1.0))
+    g = g._replace(plastic=jnp.ones_like(g.plastic), rule=jnp.full(N_RULE_PARAMS, 1.0))
     _, _, (ph, c) = lifetime(g, jax.random.PRNGKey(1), cfg)
     off = ~connected(g, cfg)
     assert bool(jnp.all(c.w[off] == 0.0))

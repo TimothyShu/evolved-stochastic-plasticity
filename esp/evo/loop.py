@@ -109,7 +109,8 @@ def rule_stats(pop: Genome, fitness, cfg: ExperimentConfig) -> dict:
     b = int(jnp.argmax(fitness))
     out = {}
     for name, v in [("eta", rp.eta), ("a_minus", rp.a_minus), ("tau_elig", rp.tau_elig),
-                    ("tau_pre", rp.tau_pre), ("tau_post", rp.tau_post), ("plastic_frac", pf)]:
+                    ("tau_pre", rp.tau_pre), ("tau_post", rp.tau_post), ("tau_prior", rp.tau_prior),
+                    ("plastic_frac", pf)]:
         out[f"mean_{name}"] = float(jnp.mean(v))
         out[f"best_{name}"] = float(v[b])
     # η × plastic share: one number for "how much can this population learn"

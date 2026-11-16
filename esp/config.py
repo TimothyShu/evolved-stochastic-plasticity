@@ -47,7 +47,16 @@ class IOConfig:
 class PlasticityConfig:
     rule: str = "identity"      # identity | three_factor
     w_max: float = 2.0          # weight-magnitude ceiling (units of v_th jump per spike)
-    noise_sigma: float = 0.0    # std of additive weight noise per ms (0 => no noise drawn)
+    noise_sigma: float = 0.0    # std of additive weight noise per √ms (0 => no noise drawn)
+    # Forgetting (decay to the newborn state). When on, each plastic weight follows a
+    # reflected AR(1)/OU process  w <- |a·w + b·ξ|,  a = exp(-Δ/τ_prior)  (τ_prior evolved),
+    # applied once per env step (Δ = dt·substeps) — exact for any Δ; see plasticity.forget.
+    # noise_mode "matched": b = w_init_std·√(1−a²) — the stationary law is then exactly
+    # |N(0, w_init_std)|, the distribution weights are drawn from at birth. An unreinforced
+    # synapse becomes statistically indistinguishable from a newborn one.
+    # noise_mode "fixed": b = noise_sigma·√Δ (decouples temperature from memory lifetime).
+    forgetting: bool = False
+    noise_mode: str = "fixed"   # fixed | matched ("matched" requires forgetting)
 
 
 @dataclass(frozen=True)
@@ -71,6 +80,7 @@ class GenomeConfig:
     tau_trace_range: tuple = (10.0, 200.0)   # pre/post trace taus (ms)
     tau_elig_range: tuple = (20.0, 2000.0)   # eligibility trace tau (ms)
     eta_range: tuple = (0.0, 0.05)           # learning rate
+    tau_prior_range: tuple = (1e3, 1e6)      # forgetting time constant (ms): 1 s – 1000 s
 
 
 @dataclass(frozen=True)
@@ -160,6 +170,7 @@ def check_dt(cfg: ExperimentConfig) -> None:
         "io.tau_readout": cfg.io.tau_readout,
         "genome.tau_trace_range[0]": cfg.genome.tau_trace_range[0],
         "genome.tau_elig_range[0]": cfg.genome.tau_elig_range[0],
+        "genome.tau_prior_range[0]": cfg.genome.tau_prior_range[0],
     }
     if cfg.neuromod.baseline_tau > 0:
         fixed_taus["neuromod.baseline_tau"] = cfg.neuromod.baseline_tau
@@ -171,6 +182,16 @@ def check_dt(cfg: ExperimentConfig) -> None:
         )
     if cfg.alif.t_ref < cfg.dt:
         raise ValueError(f"t_ref={cfg.alif.t_ref} ms < dt={cfg.dt} ms: refractory unresolvable")
+    pc = cfg.plasticity
+    if pc.noise_mode not in ("fixed", "matched"):
+        raise ValueError(f"plasticity.noise_mode '{pc.noise_mode}' not in (fixed, matched)")
+    if pc.noise_mode == "matched" and not pc.forgetting:
+        raise ValueError("noise_mode 'matched' requires plasticity.forgetting: true")
+    if pc.forgetting:
+        interval = cfg.dt * cfg.task.substeps
+        if cfg.genome.tau_prior_range[0] < 10.0 * interval:
+            raise ValueError(f"tau_prior_range[0]={cfg.genome.tau_prior_range[0]} ms < 10 × forgetting "
+                             f"interval ({interval} ms = dt·substeps)")
     if cfg.genome.tau_floor_factor < 10.0:
         raise ValueError("tau_floor_factor < 10 would let evolved taus break the dt bound")
 
