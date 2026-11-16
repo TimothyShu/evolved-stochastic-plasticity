@@ -56,7 +56,16 @@ class PlasticityConfig:
     # synapse becomes statistically indistinguishable from a newborn one.
     # noise_mode "fixed": b = noise_sigma·√Δ (decouples temperature from memory lifetime).
     forgetting: bool = False
-    noise_mode: str = "fixed"   # fixed | matched ("matched" requires forgetting)
+    noise_mode: str = "fixed"   # fixed | matched ("matched" requires forget_target "newborn")
+    # What an unreinforced plastic synapse forgets TOWARD (all use the per-env-step update):
+    #   newborn   decay to the birth DISTRIBUTION: reflected OU, stationary |N(0, w_init_std)|
+    #             under "matched" noise. Synapse identity is randomised; population stats fixed.
+    #   own_init  decay to this synapse's OWN birth value w0 (its per-lifetime default):
+    #             w <- w0 + a·(w − w0) + b·ξ. With noise_sigma 0, a deterministic return.
+    #   none      no decay — pure bounded random walk w <- reflect(w + b·ξ) on [0, w_max].
+    #             Mean-preserving away from the bounds, but its long-run law is uniform on
+    #             [0, w_max] (mean w_max/2 ≫ birth mean): expect slow upward drift.
+    forget_target: str = "newborn"
 
 
 @dataclass(frozen=True)
@@ -187,6 +196,13 @@ def check_dt(cfg: ExperimentConfig) -> None:
         raise ValueError(f"plasticity.noise_mode '{pc.noise_mode}' not in (fixed, matched)")
     if pc.noise_mode == "matched" and not pc.forgetting:
         raise ValueError("noise_mode 'matched' requires plasticity.forgetting: true")
+    if pc.forget_target not in ("newborn", "own_init", "none"):
+        raise ValueError(f"plasticity.forget_target '{pc.forget_target}' not in (newborn, own_init, none)")
+    if pc.forgetting and pc.noise_mode == "matched" and pc.forget_target != "newborn":
+        raise ValueError("noise_mode 'matched' is defined only for forget_target 'newborn'; "
+                         "use noise_mode 'fixed' with noise_sigma")
+    if pc.forgetting and pc.forget_target == "none" and pc.noise_sigma <= 0:
+        raise ValueError("forget_target 'none' with noise_sigma 0 does nothing; set noise_sigma > 0")
     if pc.forgetting:
         interval = cfg.dt * cfg.task.substeps
         if cfg.genome.tau_prior_range[0] < 10.0 * interval:

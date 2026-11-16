@@ -114,6 +114,12 @@ def forget_coeffs(rp: RuleParams, cfg: ExperimentConfig, interval: float):
     return a, b
 
 
+def _reflect(w: jnp.ndarray, w_max: float) -> jnp.ndarray:
+    """Reflect into [0, w_max] (valid while a single step ≪ w_max)."""
+    w = jnp.abs(w)
+    return w_max - jnp.abs(w_max - w)
+
+
 def forget(
     w: jnp.ndarray,
     noise: jnp.ndarray | None,
@@ -121,9 +127,14 @@ def forget(
     rp: RuleParams,
     cfg: ExperimentConfig,
     interval: float,
+    w0: jnp.ndarray | None = None,
 ) -> jnp.ndarray:
-    """Decay to the newborn state over `interval` ms (firewalled by plastic_mask).
+    """Forgetting over `interval` ms (firewalled by plastic_mask); target per
+    cfg.plasticity.forget_target — see config.PlasticityConfig.
 
+    own_init:  w <- reflect(w0 + a·(w − w0) + b·ξ)       (w0 = this lifetime's birth weights)
+    none:      w <- reflect(w + b·ξ)                      (no decay; τ_prior unused)
+    newborn (below):
         w <- min(|a·w + b·ξ|, w_max),   a = exp(-interval/τ_prior)
 
     The AR(1) kernel is symmetric under w -> -w, so its reflection at 0 is Markov
@@ -134,9 +145,21 @@ def forget(
     approximation is decay/learning interleaving within an interval, O(interval/τ_prior)
     (≤ 1% at the 10·interval floor enforced in config). w_max is a safety rail.
     """
+    target = cfg.plasticity.forget_target
+    w_max = cfg.plasticity.w_max
     a, b = forget_coeffs(rp, cfg, interval)
-    w_new = a * w
-    if noise is not None:
-        w_new = w_new + b * noise
-    w_new = jnp.minimum(jnp.abs(w_new), cfg.plasticity.w_max)
+    if target == "newborn":
+        w_new = a * w
+        if noise is not None:
+            w_new = w_new + b * noise
+        w_new = jnp.minimum(jnp.abs(w_new), w_max)
+    elif target == "own_init":
+        w_new = w0 + a * (w - w0)
+        if noise is not None:
+            w_new = w_new + b * noise
+        w_new = _reflect(w_new, w_max)
+    elif target == "none":
+        w_new = _reflect(w + b * noise, w_max)
+    else:
+        raise ValueError(f"unknown forget_target '{target}'")
     return jnp.where(plastic_mask, w_new, w)

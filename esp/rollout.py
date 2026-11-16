@@ -59,6 +59,7 @@ def lifetime(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
     learns = pc.rule != "identity" or pc.noise_sigma > 0 or pc.forgetting
     noisy = pc.noise_sigma > 0 and not pc.forgetting           # per-substep additive noise
     forget_noisy = pc.forgetting and (pc.noise_mode == "matched" or pc.noise_sigma > 0)
+    # (forget_target "none" always has noise_sigma > 0 — enforced in config)
     env_interval = cfg.dt * cfg.task.substeps                  # forgetting step (ms)
     n_out = cfg.genome.n_out
 
@@ -91,7 +92,7 @@ def lifetime(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
             # Once per env step: exact AR(1) over the interval (see plasticity.forget).
             k_next, k_f = jax.random.split(c.key)
             xi = jax.random.normal(k_f, c.w.shape) if forget_noisy else None
-            c = c._replace(w=plasticity.forget(c.w, xi, ph.plastic_mask, ph.rp, cfg, env_interval),
+            c = c._replace(w=plasticity.forget(c.w, xi, ph.plastic_mask, ph.rp, cfg, env_interval, ph.w0),
                            key=k_next)
         action = io.decode(c.readout, cfg)
         env_state, obs, reward, done = task.step(c.env_state, action, cfg)

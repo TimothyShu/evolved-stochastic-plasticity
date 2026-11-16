@@ -46,6 +46,8 @@ def main():
     p.add_argument("--noise", type=float, default=0.0, help="plasticity.noise_sigma (adds N² RNG per step)")
     p.add_argument("--forgetting", action="store_true",
                    help="decay to newborn state + matched noise (adds N² RNG per step)")
+    p.add_argument("--forget-target", default="newborn", choices=["newborn", "own_init", "none"],
+                   help="with --forgetting; own_init/none use fixed noise (--noise, default 0.001)")
     p.add_argument("--unroll", type=ints, default=[1], help="inner-scan unroll values to sweep")
     p.add_argument("--n-evals", type=int, default=1)
     p.add_argument("--repeats", type=int, default=3)
@@ -69,7 +71,10 @@ def main():
                     "evo.population_size": P, "evo.n_evals": a.n_evals,
                     "plasticity.rule": rule, "plasticity.noise_sigma": a.noise,
                     "plasticity.forgetting": a.forgetting,
-                    "plasticity.noise_mode": "matched" if a.forgetting else "fixed",
+                    "plasticity.forget_target": a.forget_target,
+                    "plasticity.noise_mode": "matched" if (a.forgetting and a.forget_target == "newborn") else "fixed",
+                    **({"plasticity.noise_sigma": a.noise or 0.001}
+                       if a.forgetting and a.forget_target != "newborn" else {}),
                 })
                 pop = init_population(jax.random.PRNGKey(0), cfg)
                 ev = make_population_eval(cfg)
