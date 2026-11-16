@@ -66,15 +66,16 @@ def main():
     rows = []
     points = [(r, h, P, u) for r in a.rules.split(",") for h in a.hidden for P in a.pop for u in a.unroll]
     for rule, h, P, u in points:
+                fg = a.forgetting or rule == "perturbation"      # perturbation explores with it
                 cfg = replace(base, scan_unroll=u, **{
                     "genome.n_hidden_max": h, "genome.init_hidden_active": h // 2,
                     "evo.population_size": P, "evo.n_evals": a.n_evals,
                     "plasticity.rule": rule, "plasticity.noise_sigma": a.noise,
-                    "plasticity.forgetting": a.forgetting,
+                    "plasticity.forgetting": fg,
                     "plasticity.forget_target": a.forget_target,
-                    "plasticity.noise_mode": "matched" if (a.forgetting and a.forget_target == "newborn") else "fixed",
+                    "plasticity.noise_mode": "matched" if (fg and a.forget_target == "newborn") else "fixed",
                     **({"plasticity.noise_sigma": a.noise or 0.001}
-                       if a.forgetting and a.forget_target != "newborn" else {}),
+                       if fg and a.forget_target != "newborn" else {}),
                 })
                 pop = init_population(jax.random.PRNGKey(0), cfg)
                 ev = make_population_eval(cfg)

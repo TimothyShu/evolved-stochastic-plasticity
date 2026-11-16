@@ -37,6 +37,17 @@ stdp          Pure pair-based STDP — no eligibility trace, no third factor:
               trace (~τ_elig/dt pairings), stdp to each step's pairings.
               Net drift for uncorrelated firing ∝ τ_pre − a_minus·τ_post, so additive
               STDP is stable only if a_minus·τ_post > τ_pre (Song et al. 2000).
+perturbation  Weight-perturbation reinforcement (REINFORCE; Williams 1992, Seung 2003).
+              The forgetting noise doubles as exploration. Per env step k (Δ = dt·substeps):
+                  w += η·δ_k·n            credit perturbations in effect during step k
+                  w  = forget(w) (+kick)  new kick b·ξ, first felt in step k+1
+                  n  = λ·n + b·ξ          leaky trace of applied kicks, λ = e^(−Δ/τ_n)
+              With δ = r − r̄,  E[δ·ε] = Σ_ε·∇R: on average a reward-gradient step.
+              τ_n is the τ_elig gene (floored at 10·Δ); it should match the reward
+              baseline (neuromod.baseline_tau), since δ only reports change relative
+              to r̄. No STDP: x_pre/x_post unused; `Traces.elig` holds n. Requires
+              plasticity.forgetting with noise. SNR per synapse ~ 1/N_syn (Werfel et
+              al. 2005), so it slows with network size.
 """
 
 from __future__ import annotations
@@ -65,7 +76,7 @@ class Traces(NamedTuple):
     elig: jnp.ndarray     # [n_pre, N]  (shape (0, 0) for identity: nothing carried)
 
 
-RULES = ("identity", "three_factor", "stdp")
+RULES = ("identity", "three_factor", "stdp", "perturbation")
 
 
 def _stdp_term(x_pre, x_post, pre, post, rp: RuleParams):
@@ -80,9 +91,10 @@ def _stdp_term(x_pre, x_post, pre, post, rp: RuleParams):
 def init_traces(cfg: ExperimentConfig) -> Traces:
     rule = cfg.plasticity.rule
     empty = jnp.zeros((0, 0), jnp.float32)
-    if rule == "identity":
+    if rule in ("identity", "perturbation"):
         z = jnp.zeros((0,), jnp.float32)
-        return Traces(z, z, empty)
+        noise_trace = jnp.zeros((cfg.n_pre, cfg.n_neurons), jnp.float32) if rule == "perturbation" else empty
+        return Traces(z, z, noise_trace)
     return Traces(
         x_pre=jnp.zeros(cfg.n_pre, jnp.float32),
         x_post=jnp.zeros(cfg.n_neurons, jnp.float32),
@@ -101,7 +113,7 @@ def update(
     cfg: ExperimentConfig,
 ) -> tuple[Traces, jnp.ndarray]:
     rule = cfg.plasticity.rule
-    if rule == "identity":
+    if rule in ("identity", "perturbation"):   # perturbation learns per env step (credit_noise)
         dw = jnp.zeros_like(w)
     elif rule == "three_factor":
         dt = cfg.dt
@@ -190,3 +202,20 @@ def forget(
     else:
         raise ValueError(f"unknown forget_target '{target}'")
     return jnp.where(plastic_mask, w_new, w)
+
+
+# ── weight perturbation (rule "perturbation") ───────────────────────────────
+
+def noise_trace_decay(rp: RuleParams, interval: float) -> jnp.ndarray:
+    """λ = exp(−Δ/τ_n), τ_n = max(τ_elig gene, 10·Δ) — the trace is only sampled every Δ."""
+    return jnp.exp(-interval / jnp.maximum(rp.tau_elig, 10.0 * interval))
+
+
+def credit_noise(w, noise_trace, modulator, plastic_mask, rp: RuleParams, cfg: ExperimentConfig):
+    """w += η·δ·n on plastic synapses (clipped to [0, w_max])."""
+    return apply(w, rp.eta * modulator * noise_trace, plastic_mask, cfg)
+
+
+def update_noise_trace(noise_trace, kick, rp: RuleParams, interval: float):
+    """n <- λ·n + kick, where kick = b·ξ is the noise actually applied this env step."""
+    return noise_trace_decay(rp, interval) * noise_trace + kick

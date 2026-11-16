@@ -61,6 +61,9 @@ def lifetime(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
     forget_noisy = pc.forgetting and (pc.noise_mode == "matched" or pc.noise_sigma > 0)
     # (forget_target "none" always has noise_sigma > 0 — enforced in config)
     env_interval = cfg.dt * cfg.task.substeps                  # forgetting step (ms)
+    perturb = pc.rule == "perturbation"
+    # Per-substep plasticity only for spike-driven rules (and legacy fixed noise).
+    substep_learns = pc.rule in ("three_factor", "stdp") or noisy
     n_out = cfg.genome.n_out
 
     k_dec, k_env, k_run = jax.random.split(key, 3)
@@ -74,7 +77,7 @@ def lifetime(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
         # Exact (±1 products), and the matvec streams W directly — no signed copy.
         neuron, z = alif.step(c.neuron, pre * ph.sign_pre, c.w, ph.active, cfg.alif, cfg.dt)
 
-        if learns:
+        if substep_learns:
             noise = jax.random.normal(k_noise, c.w.shape) if noisy else None
             traces, dw = plasticity.update(c.traces, pre, z, c.m, c.w, noise, ph.rp, cfg)
             w = plasticity.apply(c.w, dw, ph.plastic_mask, cfg)
@@ -86,19 +89,33 @@ def lifetime(genome: Genome, key: jax.Array, cfg: ExperimentConfig):
                        n_spikes=c.n_spikes + jnp.sum(z))
         return c, None
 
+    def forget_step(c: Carry) -> Carry:
+        """Once per env step: exact AR(1) over the interval (see plasticity.forget).
+        Under 'perturbation' the applied kick b·ξ is also added to the noise trace."""
+        k_next, k_f = jax.random.split(c.key)
+        xi = jax.random.normal(k_f, c.w.shape) if forget_noisy else None
+        w = plasticity.forget(c.w, xi, ph.plastic_mask, ph.rp, cfg, env_interval, ph.w0)
+        c = c._replace(w=w, key=k_next)
+        if perturb:
+            _, b = plasticity.forget_coeffs(ph.rp, cfg, env_interval)
+            n = plasticity.update_noise_trace(c.traces.elig, b * xi, ph.rp, env_interval)
+            c = c._replace(traces=c.traces._replace(elig=n))
+        return c
+
     def env_step(c: Carry, _):
         c, _ = jax.lax.scan(substep, c, None, length=cfg.task.substeps, unroll=cfg.scan_unroll)
-        if pc.forgetting and learns:
-            # Once per env step: exact AR(1) over the interval (see plasticity.forget).
-            k_next, k_f = jax.random.split(c.key)
-            xi = jax.random.normal(k_f, c.w.shape) if forget_noisy else None
-            c = c._replace(w=plasticity.forget(c.w, xi, ph.plastic_mask, ph.rp, cfg, env_interval, ph.w0),
-                           key=k_next)
+        if pc.forgetting and learns and not perturb:
+            c = forget_step(c)
         action = io.decode(c.readout, cfg)
         env_state, obs, reward, done = task.step(c.env_state, action, cfg)
         mod_state, m = neuromod.modulate(c.mod_state, reward, cfg)
         c = c._replace(env_state=env_state, obs=obs, reward=reward, mod_state=mod_state, m=m,
                        ret=c.ret + reward, n_silent=c.n_silent + (action < 0))
+        if perturb:
+            # δ_k credits only kicks that shaped step k's behaviour (applied before it);
+            # the new kick is drawn after, so it is first credited by δ_{k+1}.
+            c = c._replace(w=plasticity.credit_noise(c.w, c.traces.elig, m, ph.plastic_mask, ph.rp, cfg))
+            c = forget_step(c)
         return c, None
 
     env_state, obs = task.reset(k_env, cfg)

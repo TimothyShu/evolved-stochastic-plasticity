@@ -45,7 +45,7 @@ class IOConfig:
 
 @dataclass(frozen=True)
 class PlasticityConfig:
-    rule: str = "identity"      # identity | three_factor | stdp (pure, no eligibility/modulator)
+    rule: str = "identity"      # identity | three_factor | stdp (pure) | perturbation (noise-credit)
     w_max: float = 2.0          # weight-magnitude ceiling (units of v_th jump per spike)
     noise_sigma: float = 0.0    # std of additive weight noise per √ms (0 => no noise drawn)
     # Forgetting (decay to the newborn state). When on, each plastic weight follows a
@@ -192,8 +192,13 @@ def check_dt(cfg: ExperimentConfig) -> None:
     if cfg.alif.t_ref < cfg.dt:
         raise ValueError(f"t_ref={cfg.alif.t_ref} ms < dt={cfg.dt} ms: refractory unresolvable")
     pc = cfg.plasticity
-    if pc.rule not in ("identity", "three_factor", "stdp"):
-        raise ValueError(f"plasticity.rule '{pc.rule}' not in (identity, three_factor, stdp)")
+    if pc.rule not in ("identity", "three_factor", "stdp", "perturbation"):
+        raise ValueError(f"plasticity.rule '{pc.rule}' not in (identity, three_factor, stdp, perturbation)")
+    if pc.rule == "perturbation":
+        noisy = pc.forgetting and (pc.noise_mode == "matched" or pc.noise_sigma > 0)
+        if not noisy:
+            raise ValueError("rule 'perturbation' explores with the forgetting noise: set "
+                             "plasticity.forgetting: true with noise (matched, or noise_sigma > 0)")
     if pc.noise_mode not in ("fixed", "matched"):
         raise ValueError(f"plasticity.noise_mode '{pc.noise_mode}' not in (fixed, matched)")
     if pc.noise_mode == "matched" and not pc.forgetting:

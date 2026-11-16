@@ -13,7 +13,7 @@ params:
   - {name: n-generations, type: int,   default: 200}
   - {name: n-evals,       type: int,   default: 4,   help: "lifetimes per fitness estimate"}
   - {name: pop-size,      type: int,   default: 256}
-  - {name: rule,          type: enum,  choices: [identity, three_factor, stdp], default: identity}
+  - {name: rule,          type: enum,  choices: [identity, three_factor, stdp, perturbation], default: identity}
   - {name: seed,          type: int,   default: 0}
   - {name: smoke-test,    type: bool,  default: false}
   # benchmark mode (Stage 0 gate)
